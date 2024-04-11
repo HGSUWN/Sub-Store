@@ -1,87 +1,99 @@
-log(`🚀 开始`)
+async function main() {
+  // 解构参数
+  const { type, name, outbound, includeUnsupportedProxy } = $arguments;
 
-let { type, name, outbound, includeUnsupportedProxy } = $arguments
+  // 确定类型
+  const isCollection = /^1$|col|组合/i.test(type);
+  const dataType = isCollection ? 'collection' : 'subscription';
 
-log(`传入参数 type: ${type}, name: ${name}, outbound: ${outbound}`)
+  // 解析配置文件
+  const config = JSON.parse($content ?? $files[0]);
 
-type = /^1$|col|组合/i.test(type) ? 'collection' : 'subscription'
+  // 并行获取订阅代理和解析bounds参数
+  const [proxies, outbounds] = await Promise.all([
+    fetchProxies({ name, dataType, includeUnsupportedProxy }),
+    parseOutbounds(outbound),
+  ]);
 
-log(`① 解析配置文件`)
-let config
-try {
-  config = JSON.parse($content ?? $files[0])
-} catch (e) {
-  log(`${e.message ?? e}`)
-  throw new Error('配置文件不是合法的 JSON')
+  // 并行处理outbounds并插入代理
+  await Promise.all(
+    config.outbounds.map(outbound =>
+      insertOutboundNodes(outbound, outbounds, proxies)
+    )
+  );
+
+  // 检查并添加兼容性outbound
+  checkAndInsertCompatibleOutbound(config, outbounds);
+
+  // 添加代理到config中
+  config.outbounds.push(...proxies);
+
+  // 存储修改后的config到$content中
+  $content = JSON.stringify(config, null, 2);
 }
 
-log(`② 获取订阅`)
-log(`将读取名称为 ${name} 的 ${type === 'collection' ? '组合' : ''}订阅`)
-let proxies = await produceArtifact({
-  name,
-  type,
-  platform: 'sing-box',
-  produceType: 'internal',
-  produceOpts: {
-    'include-unsupported-proxy': includeUnsupportedProxy,
-  },
-})
+// 异步获取订阅代理
+async function fetchProxies({ name, dataType, includeUnsupportedProxy }) {
+  return await produceArtifact({
+    name,
+    type: dataType,
+    platform: 'sing-box',
+    produceType: 'internal',
+    produceOpts: {
+      'include-unsupported-proxy': includeUnsupportedProxy,
+    },
+  });
+}
 
-log(`③ outbound 规则解析`)
-const outbounds = outbound
-  .split('🕳')
-  .filter(i => i)
-  .map(i => {
-    let [outboundPattern, tagPattern = '.*'] = i.split('🏷')
-    const tagRegex = createRegExp(tagPattern)
-    log(`匹配 🏷 ${tagRegex} 的节点将插入匹配 🕳 ${createRegExp(outboundPattern)} 的 outbound 中`)
-    return [outboundPattern, tagRegex]
-  })
+// 异步解析bounds参数
+async function parseOutbounds(outbound) {
+  return await Promise.all(
+    outbound.split('🕳').map(async i => {
+      const [outboundPattern, tagPattern = '.*'] = i.split('🏷');
+      const tagRegex = createRegExp(tagPattern);
+      return [outboundPattern, tagRegex];
+    })
+  );
+}
 
-log(`④ outbound 插入节点`)
-config.outbounds.forEach(outbound => {
-  outbounds.forEach(([outboundPattern, tagRegex]) => {
-    const outboundRegex = createRegExp(outboundPattern)
-    if (outboundRegex.test(outbound.tag)) {
-      outbound.outbounds ||= []
-      const tags = getTags(proxies, tagRegex)
-      log(`🕳 ${outbound.tag} 匹配 ${outboundRegex}, 插入 ${tags.length} 个 🏷 匹配 ${tagRegex} 的节点`)
-      outbound.outbounds.push(...tags)
-    }
-  })
-})
-
-const compatibleOutbound = { tag: 'COMPATIBLE', type: 'direct' }
-
-log(`⑤ 空 outbounds 检查`)
-config.outbounds.forEach(outbound => {
-  outbounds.forEach(([outboundPattern, tagRegex]) => {
-    const outboundRegex = createRegExp(outboundPattern)
-    if (outboundRegex.test(outbound.tag)) {
-      outbound.outbounds ||= []
-      if (outbound.outbounds.length === 0) {
-        config.outbounds.push(compatibleOutbound.tag)
-        log(`🕳 ${outbound.tag} 的 outbounds 为空, 自动插入 COMPATIBLE(direct)`)
-        outbound.outbounds.push(compatibleOutbound.tag)
+// 异步插入代理到outbound节点
+async function insertOutboundNodes(outbound, outbounds, proxies) {
+  await Promise.all(
+    outbounds.map(async ([outboundPattern, tagRegex]) => {
+      const outboundRegex = createRegExp(outboundPattern);
+      if (outboundRegex.test(outbound.tag)) {
+        outbound.outbounds ||= [];
+        const tags = getTags(proxies, tagRegex);
+        outbound.outbounds.push(...tags);
       }
-    }
-  })
-})
+    })
+  );
+}
 
-config.outbounds.push(...proxies)
+// 检查并添加兼容性outbound
+function checkAndInsertCompatibleOutbound(config, outbounds) {
+  config.outbounds.forEach(outbound => {
+    outbounds.forEach(([outboundPattern, tagRegex]) => {
+      const outboundRegex = createRegExp(outboundPattern);
+      if (outboundRegex.test(outbound.tag)) {
+        outbound.outbounds ||= [];
+        if (outbound.outbounds.length === 0) {
+          config.outbounds.push({ tag: 'COMPATIBLE', type: 'direct' });
+          outbound.outbounds.push('COMPATIBLE');
+        }
+      }
+    });
+  });
+}
 
-$content = JSON.stringify(config, null, 2)
-
+// 获取标签
 function getTags(proxies, regex) {
-  return (regex ? proxies.filter(p => regex.test(p.tag)) : proxies).map(p => p.tag)
+  return (regex ? proxies.filter(p => regex.test(p.tag)) : proxies).map(p => p.tag);
 }
 
-function log(v) {
-  console.log(`[📦 sing-box 模板脚本] ${v}`)
-}
-
+// 创建正则表达式
 function createRegExp(pattern) {
-  return new RegExp(pattern.replace('ℹ️', ''), pattern.includes('ℹ️') ? 'i' : undefined)
+  return new RegExp(pattern.replace('ℹ️', ''), pattern.includes('ℹ️') ? 'i' : undefined);
 }
 
-log(`🔚 结束`)
+main(); // 执行主函数
