@@ -60,7 +60,7 @@ config.outbounds.forEach(outbound => {
     if (outboundRegex.test(outbound.tag)) {
       outbound.outbounds ||= []
       if (outbound.outbounds.length === 0) {
-        config.outbounds.push(compatibleOutbound)
+        config.outbounds.push(compatibleOutbound.tag)
         log(`🕳 ${outbound.tag} 的 outbounds 为空, 自动插入 COMPATIBLE(direct)`)
         outbound.outbounds.push(compatibleOutbound.tag)
       }
