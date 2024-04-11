@@ -1,96 +1,87 @@
-const { type, name, outbound, includeUnsupportedProxy } = $arguments;
+log(`🚀 开始`)
 
-// 解析输入类型
-const parsedType = /^1$|col|组合/i.test(type) ? 'collection' : 'subscription';
+let { type, name, outbound, includeUnsupportedProxy } = $arguments
 
-// 解析配置文件
-let config;
+log(`传入参数 type: ${type}, name: ${name}, outbound: ${outbound}`)
+
+type = /^1$|col|组合/i.test(type) ? 'collection' : 'subscription'
+
+log(`① 解析配置文件`)
+let config
 try {
-  config = JSON.parse($content ?? $files[0]);
+  config = JSON.parse($content ?? $files[0])
 } catch (e) {
-  throw new Error('配置文件不是合法的 JSON');
+  log(`${e.message ?? e}`)
+  throw new Error('配置文件不是合法的 JSON')
 }
 
-// 解析输出规则
-const outbounds = parseOutbounds(outbound);
+log(`② 获取订阅`)
+log(`将读取名称为 ${name} 的 ${type === 'collection' ? '组合' : ''}订阅`)
+let proxies = await produceArtifact({
+  name,
+  type,
+  platform: 'sing-box',
+  produceType: 'internal',
+  produceOpts: {
+    'include-unsupported-proxy': includeUnsupportedProxy,
+  },
+})
 
-// 生成代理并更新配置文件
-await generateProxiesAndUpdateConfig();
+log(`③ outbound 规则解析`)
+const outbounds = outbound
+  .split('🕳')
+  .filter(i => i)
+  .map(i => {
+    let [outboundPattern, tagPattern = '.*'] = i.split('🏷')
+    const tagRegex = createRegExp(tagPattern)
+    log(`匹配 🏷 ${tagRegex} 的节点将插入匹配 🕳 ${createRegExp(outboundPattern)} 的 outbound 中`)
+    return [outboundPattern, tagRegex]
+  })
 
-// 将配置文件转换为字符串
-$content = JSON.stringify(config, null, 2);
-
-// 解析输出规则
-function parseOutbounds(outbound) {
-  return outbound.split('🕳').filter(Boolean).map(parseOutbound);
-}
-
-// 解析单个输出规则
-function parseOutbound(outboundString) {
-  const [outboundPattern, tagPattern = '.*'] = outboundString.split('🏷');
-  return {
-    outboundRegex: createRegExp(outboundPattern),
-    tagRegex: createRegExp(tagPattern),
-  };
-}
-
-// 创建正则表达式
-function createRegExp(pattern) {
-  return new RegExp(pattern.replace('ℹ️', ''), pattern.includes('ℹ️') ? 'i' : undefined);
-}
-
-// 生成代理并更新配置文件
-async function generateProxiesAndUpdateConfig() {
-  const proxies = await produceProxies();
-
-  const tagMap = new Map();
-  const compatibleTags = [];
-
-  // 构建标签映射
-  proxies.forEach(({ tag }) => {
-    if (!tagMap.has(tag)) {
-      tagMap.set(tag, []);
+log(`④ outbound 插入节点`)
+config.outbounds.forEach(outbound => {
+  outbounds.forEach(([outboundPattern, tagRegex]) => {
+    const outboundRegex = createRegExp(outboundPattern)
+    if (outboundRegex.test(outbound.tag)) {
+      outbound.outbounds ||= []
+      const tags = getTags(proxies, tagRegex)
+      log(`🕳 ${outbound.tag} 匹配 ${outboundRegex}, 插入 ${tags.length} 个 🏷 匹配 ${tagRegex} 的节点`)
+      outbound.outbounds.push(...tags)
     }
-    tagMap.get(tag).push(proxy);
-  });
+  })
+})
 
-  // 更新配置文件
-  config.outbounds.forEach((configOutbound) => {
-    outbounds.forEach(({ outboundRegex, tagRegex }) => {
-      if (outboundRegex.test(configOutbound.tag)) {
-        const tags = getTags(tagMap, tagRegex);
-        configOutbound.outbounds = [...(configOutbound.outbounds || []), ...tags, ...compatibleTags];
-        if (tags.length === 0 && compatibleTags.length === 0) {
-          compatibleTags.push('COMPATIBLE');
-        }
+const compatibleOutbound = { tag: 'COMPATIBLE', type: 'direct' }
+
+log(`⑤ 空 outbounds 检查`)
+config.outbounds.forEach(outbound => {
+  outbounds.forEach(([outboundPattern, tagRegex]) => {
+    const outboundRegex = createRegExp(outboundPattern)
+    if (outboundRegex.test(outbound.tag)) {
+      outbound.outbounds ||= []
+      if (outbound.outbounds.length === 0) {
+        config.outbounds.push(compatibleOutbound)
+        log(`🕳 ${outbound.tag} 的 outbounds 为空, 自动插入 COMPATIBLE(direct)`)
+        outbound.outbounds.push(compatibleOutbound.tag)
       }
-    });
-  });
-
-  config.outbounds.push(...proxies);
-}
-
-// 生成代理
-async function produceProxies() {
-  const produceOptions = {
-    name,
-    type: parsedType,
-    platform: 'sing-box',
-    produceType: 'internal',
-    produceOpts: {
-      'include-unsupported-proxy': includeUnsupportedProxy,
-    },
-  };
-  return await produceArtifact(produceOptions);
-}
-
-// 获取匹配标签
-function getTags(tagMap, regex) {
-  const matchedTags = [];
-  for (const [tag, proxies] of tagMap.entries()) {
-    if (regex.test(tag)) {
-      matchedTags.push(...proxies.map((proxy) => proxy.tag));
     }
-  }
-  return matchedTags;
+  })
+})
+
+config.outbounds.push(...proxies)
+
+$content = JSON.stringify(config, null, 2)
+
+function getTags(proxies, regex) {
+  return (regex ? proxies.filter(p => regex.test(p.tag)) : proxies).map(p => p.tag)
 }
+
+function log(v) {
+  console.log(`[📦 sing-box 模板脚本] ${v}`)
+}
+
+function createRegExp(pattern) {
+  return new RegExp(pattern.replace('ℹ️', ''), pattern.includes('ℹ️') ? 'i' : undefined)
+}
+
+log(`🔚 结束`)
