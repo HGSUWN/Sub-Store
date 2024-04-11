@@ -11,6 +11,16 @@ try {
   throw new Error('配置文件不是合法的 JSON')
 }
 
+let proxies = await produceArtifact({
+  name,
+  type,
+  platform: 'sing-box',
+  produceType: 'internal',
+  produceOpts: {
+    'include-unsupported-proxy': includeUnsupportedProxy,
+  },
+})
+
 // 解析输出规则
 const outbounds = parseOutbounds(outbound)
 
