@@ -1,4 +1,5 @@
-const MAX_CACHE_SIZE = 100; // 你可以根据需要设置合适的缓存大小
+// 主文件
+
 class LRUCache {
   constructor(maxSize) {
     this.maxSize = maxSize
@@ -38,8 +39,6 @@ class LRUCache {
   }
 }
 
-const cache = new LRUCache(MAX_CACHE_SIZE)
-
 const fetchSubscriptions = async ({ name, type, includeUnsupportedProxy }) => {
   // 假设这里是 fetchSubscriptions 的实现
 }
@@ -62,11 +61,16 @@ const getMatchedTags = (tag, outbounds, proxies) => {
 
 const main = async () => {
   try {
+    const MAX_CACHE_SIZE = 10 // 定义全局变量
+
     const { type, name, outbound, includeUnsupportedProxy } = $arguments
 
     const config = JSON.parse($content ?? $files[0])
     const { value: proxies } = await fetchSubscriptions({ name, type, includeUnsupportedProxy })
     const outbounds = parseOutbounds(outbound)
+
+    // 初始化LRU缓存
+    const cache = new LRUCache(MAX_CACHE_SIZE)
 
     // 并行处理每个配置项的匹配标签
     config.outbounds = await Promise.all(config.outbounds.map(async configOutbound => {
