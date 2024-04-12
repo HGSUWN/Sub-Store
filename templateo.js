@@ -1,61 +1,58 @@
-/ 缓存对象
-const cache = {};
+const { type, name, outbound, includeUnsupportedProxy } = $arguments;
 
-// 主函数
-const main = async () => {
-  try {
-    log(`🚀 开始`);
-    const { type, name, outbound, includeUnsupportedProxy } = $arguments;
-    log(`传入参数 type: ${type}, name: ${name}, outbound: ${outbound}`);
+// 标准化 type 变量
+const isCollection = /^1$|col|组合/i.test(type);
 
-    const config = JSON.parse($content ?? $files[0]);
+let config;
+try {
+  config = JSON.parse($content ?? $files[0]);
+} catch (e) {
+  throw new Error('配置文件不是合法的 JSON');
+}
 
-    // 获取订阅并解析出站规则
-    const [proxies, outbounds] = await Promise.allSettled([
-      fetchSubscriptions({ name, type, includeUnsupportedProxy }),
-      parseOutbounds(outbound)
-    ]);
+// 提取出bounds信息
+const outbounds = outbound
+  .split('🕳')
+  .filter(Boolean)
+  .map(entry => {
+    const [outboundPattern, tagPattern = '.*'] = entry.split('🏷');
+    const outboundRegex = createRegExp(outboundPattern);
+    const tagRegex = createRegExp(tagPattern);
+    return { outboundRegex, tagRegex };
+  });
 
-    // 一次性匹配出站规则和节点标签
-    config.outbounds.forEach(configOutbound => {
-      const matchedOutbounds = outbounds.value.filter(({ outboundRegex }) => outboundRegex.test(configOutbound.tag));
-      const matchedTags = matchedOutbounds.flatMap(({ tagRegex }) => getTagsFromCache(tagRegex) || filterTags(proxies.value, tagRegex));
+// 更新 outbounds
+config.outbounds.forEach(configOutbound => {
+  outbounds.forEach(({ outboundRegex, tagRegex }) => {
+    if (outboundRegex.test(configOutbound.tag)) {
+      configOutbound.outbounds = configOutbound.outbounds || [];
+      configOutbound.outbounds.push(...getTags(tagRegex));
+    }
+  });
+});
 
-      // 如果没有匹配的节点标签，则添加兼容节点
-      if (matchedTags.length === 0) {
-        const compatibleOutbound = { tag: 'COMPATIBLE', type: 'direct' };
-        configOutbound.outbounds = ['COMPATIBLE'];
-        log(`🕳 ${configOutbound.tag} 的 outbounds 为空, 自动插入 COMPATIBLE(direct)`);
-        config.outbounds.push(compatibleOutbound);
-      } else {
-        configOutbound.outbounds = matchedTags;
-      }
-    });
+// 添加兼容的outbounds
+const hasCompatibleOutbound = outbounds.some(({ outboundRegex }) =>
+  config.outbounds.every(configOutbound => !outboundRegex.test(configOutbound.tag))
+);
 
-    // 将所有订阅节点添加到配置中
-    config.outbounds.push(...proxies.value);
+if (hasCompatibleOutbound) {
+  config.outbounds.push({ tag: 'COMPATIBLE', type: 'direct' });
+  config.outbounds.forEach(configOutbound => {
+    configOutbound.outbounds = configOutbound.outbounds || [];
+    configOutbound.outbounds.push('COMPATIBLE');
+  });
+}
 
-    $content = JSON.stringify(config, null, 2);
+// 添加代理
+config.outbounds.push(...proxies);
 
-    log(`🔚 结束`);
-  } catch (error) {
-    console.error(error);
-    throw new Error('执行出错');
-  }
-};
+$content = JSON.stringify(config, null, 2);
 
-// 解析出站规则
-const parseOutbounds = outbound => outbound.split('🕳').filter(Boolean).map(parseOutbound);
+function getTags(regex) {
+  return (regex ? proxies.filter(proxy => regex.test(proxy.tag)) : proxies).map(proxy => proxy.tag);
+}
 
-// 从缓存中获取节点标签
-const getTagsFromCache = regex => cache[regex.source];
-
-// 根据规则筛选节点标签
-const filterTags = (proxies, regex) => {
-  const tags = proxies.filter(({ tag }) => regex.test(tag)).map(({ tag }) => tag);
-  cache[regex.source] = tags; // 将解析结果缓存起来
-  return tags;
-};
-
-// 执行主函数
-main().catch(error => console.error(error));
+function createRegExp(pattern) {
+  return new RegExp(pattern.replace('ℹ️', ''), pattern.includes('ℹ️') ? 'i' : undefined);
+}
