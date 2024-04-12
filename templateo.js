@@ -1,9 +1,4 @@
-const parseOutbounds = outbound => {
-  if (typeof outbound !== 'string') {
-    throw new Error('传入的 outbound 参数不是有效的字符串类型')
-  }
-  return outbound.split('🕳').filter(Boolean).map(parseOutbound)
-}
+const cache = {}
 
 const main = async () => {
   try {
@@ -14,7 +9,7 @@ const main = async () => {
     const config = JSON.parse($content ?? $files[0])
     const [proxiesResult, outboundsResult] = await Promise.allSettled([
       fetchSubscriptions({ name, type, includeUnsupportedProxy }),
-      parseOutbounds(outbound) // 在这里确保传入的 outbound 是有效的字符串
+      parseOutbounds(outbound)
     ])
 
     const proxies = proxiesResult.value
@@ -41,6 +36,18 @@ const main = async () => {
     console.error(error)
     throw new Error('执行出错')
   }
+}
+
+const parseOutbounds = outbound => outbound.split('🕳').filter(Boolean).map(parseOutbound)
+
+const getMatchedTags = (tag, outbounds, proxies) => {
+  if (!cache[tag]) {
+    const matchedOutbounds = outbounds.filter(({ outboundRegex }) => outboundRegex.test(tag))
+    cache[tag] = matchedOutbounds.flatMap(({ tagRegex }) =>
+      proxies.filter(({ tag }) => tagRegex.test(tag)).map(({ tag }) => tag)
+    )
+  }
+  return cache[tag]
 }
 
 main().catch(error => console.error(error))
