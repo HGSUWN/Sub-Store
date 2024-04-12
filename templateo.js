@@ -1,53 +1,61 @@
-const cache = {}
+/ 缓存对象
+const cache = {};
 
+// 主函数
 const main = async () => {
   try {
-    log(`🚀 开始`)
-    const { type, name, outbound, includeUnsupportedProxy } = $arguments
-    log(`传入参数 type: ${type}, name: ${name}, outbound: ${outbound}`)
+    log(`🚀 开始`);
+    const { type, name, outbound, includeUnsupportedProxy } = $arguments;
+    log(`传入参数 type: ${type}, name: ${name}, outbound: ${outbound}`);
 
-    const config = JSON.parse($content ?? $files[0])
-    const [proxiesResult, outboundsResult] = await Promise.allSettled([
+    const config = JSON.parse($content ?? $files[0]);
+
+    // 获取订阅并解析出站规则
+    const [proxies, outbounds] = await Promise.allSettled([
       fetchSubscriptions({ name, type, includeUnsupportedProxy }),
       parseOutbounds(outbound)
-    ])
+    ]);
 
-    const proxies = proxiesResult.value
-    const outbounds = outboundsResult.value
-    const configOutbounds = config.outbounds
+    // 一次性匹配出站规则和节点标签
+    config.outbounds.forEach(configOutbound => {
+      const matchedOutbounds = outbounds.value.filter(({ outboundRegex }) => outboundRegex.test(configOutbound.tag));
+      const matchedTags = matchedOutbounds.flatMap(({ tagRegex }) => getTagsFromCache(tagRegex) || filterTags(proxies.value, tagRegex));
 
-    for (const configOutbound of configOutbounds) {
-      const matchedTags = getMatchedTags(configOutbound.tag, outbounds, proxies)
-
+      // 如果没有匹配的节点标签，则添加兼容节点
       if (matchedTags.length === 0) {
-        const compatibleOutbound = { tag: 'COMPATIBLE', type: 'direct' }
-        configOutbound.outbounds = ['COMPATIBLE', compatibleOutbound]
-        log(`🕳 ${configOutbound.tag} 的 outbounds 为空, 自动插入 COMPATIBLE(direct)`)
+        const compatibleOutbound = { tag: 'COMPATIBLE', type: 'direct' };
+        configOutbound.outbounds = ['COMPATIBLE'];
+        log(`🕳 ${configOutbound.tag} 的 outbounds 为空, 自动插入 COMPATIBLE(direct)`);
+        config.outbounds.push(compatibleOutbound);
       } else {
-        configOutbound.outbounds = matchedTags
+        configOutbound.outbounds = matchedTags;
       }
-    }
+    });
 
-    config.outbounds.push(...proxies)
-    $content = JSON.stringify(config, null, 2)
+    // 将所有订阅节点添加到配置中
+    config.outbounds.push(...proxies.value);
 
-    log(`🔚 结束`)
+    $content = JSON.stringify(config, null, 2);
+
+    log(`🔚 结束`);
   } catch (error) {
-    console.error(error)
-    throw new Error('执行出错')
+    console.error(error);
+    throw new Error('执行出错');
   }
-}
+};
 
-const parseOutbounds = outbound => outbound.split('🕳').filter(Boolean).map(parseOutbound)
+// 解析出站规则
+const parseOutbounds = outbound => outbound.split('🕳').filter(Boolean).map(parseOutbound);
 
-const getMatchedTags = (tag, outbounds, proxies) => {
-  if (!cache[tag]) {
-    const matchedOutbounds = outbounds.filter(({ outboundRegex }) => outboundRegex.test(tag))
-    cache[tag] = matchedOutbounds.flatMap(({ tagRegex }) =>
-      proxies.filter(({ tag }) => tagRegex.test(tag)).map(({ tag }) => tag)
-    )
-  }
-  return cache[tag]
-}
+// 从缓存中获取节点标签
+const getTagsFromCache = regex => cache[regex.source];
 
-main().catch(error => console.error(error))
+// 根据规则筛选节点标签
+const filterTags = (proxies, regex) => {
+  const tags = proxies.filter(({ tag }) => regex.test(tag)).map(({ tag }) => tag);
+  cache[regex.source] = tags; // 将解析结果缓存起来
+  return tags;
+};
+
+// 执行主函数
+main().catch(error => console.error(error));
