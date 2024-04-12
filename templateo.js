@@ -1,3 +1,4 @@
+const MAX_CACHE_SIZE = 100; // 你可以根据需要设置合适的缓存大小
 class LRUCache {
   constructor(maxSize) {
     this.maxSize = maxSize
