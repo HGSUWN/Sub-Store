@@ -1,5 +1,7 @@
-// 主文件
+// 定义全局变量 MAX_CACHE_SIZE
+const MAX_CACHE_SIZE = 10
 
+// 缓存类
 class LRUCache {
   constructor(maxSize) {
     this.maxSize = maxSize
@@ -39,12 +41,15 @@ class LRUCache {
   }
 }
 
+// 模拟获取订阅信息的异步函数
 const fetchSubscriptions = async ({ name, type, includeUnsupportedProxy }) => {
   // 假设这里是 fetchSubscriptions 的实现
 }
 
+// 解析出口配置项
 const parseOutbounds = outbound => outbound.split('🕳').filter(Boolean)
 
+// 获取匹配标签的函数
 const getMatchedTags = (tag, outbounds, proxies) => {
   const matchedTags = new Set()
   for (const { outboundRegex, tagRegex } of outbounds) {
@@ -59,10 +64,9 @@ const getMatchedTags = (tag, outbounds, proxies) => {
   return [...matchedTags]
 }
 
+// 主函数
 const main = async () => {
   try {
-    const MAX_CACHE_SIZE = 10 // 定义全局变量
-
     const { type, name, outbound, includeUnsupportedProxy } = $arguments
 
     const config = JSON.parse($content ?? $files[0])
