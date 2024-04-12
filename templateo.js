@@ -1,8 +1,3 @@
-
-const cache = new Map()
-const MAX_CACHE_SIZE = 100 // 最大缓存项数量
-const CACHE_EXPIRY_TIME = 3600 * 1000 // 缓存过期时间，单位：毫秒，这里设置为1小时
-
 const fetchSubscriptions = async ({ name, type, includeUnsupportedProxy }) => {
   // 假设这里是 fetchSubscriptions 的实现
 }
@@ -10,12 +5,6 @@ const fetchSubscriptions = async ({ name, type, includeUnsupportedProxy }) => {
 const parseOutbounds = outbound => outbound.split('🕳').filter(Boolean)
 
 const getMatchedTags = (tag, outbounds, proxies) => {
-  const now = Date.now()
-  const cached = cache.get(tag)
-  if (cached && now - cached.timestamp < CACHE_EXPIRY_TIME) {
-    return cached.data
-  }
-
   const matchedTags = new Set()
   for (const { outboundRegex, tagRegex } of outbounds) {
     if (outboundRegex.test(tag)) {
@@ -26,16 +15,7 @@ const getMatchedTags = (tag, outbounds, proxies) => {
       })
     }
   }
-
-  const result = [...matchedTags]
-  cache.set(tag, { data: result, timestamp: now })
-
-  if (cache.size > MAX_CACHE_SIZE) {
-    const oldestKey = cache.keys().next().value
-    cache.delete(oldestKey)
-  }
-
-  return result
+  return [...matchedTags]
 }
 
 const main = async () => {
