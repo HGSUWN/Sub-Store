@@ -1,70 +1,42 @@
-// 定义全局变量 MAX_CACHE_SIZE
-const MAX_CACHE_SIZE = 10
+const cache = new Map()
+const MAX_CACHE_SIZE = 100 // 最大缓存项数量
+const CACHE_EXPIRY_TIME = 3600 * 1000 // 缓存过期时间，单位：毫秒，这里设置为1小时
 
-// 缓存类
-class LRUCache {
-  constructor(maxSize) {
-    this.maxSize = maxSize
-    this.cache = new Map()
-    this.keys = [] // 用于记录键的访问顺序
-  }
-
-  get(key) {
-    if (!this.cache.has(key)) return null
-    this.updateAccessOrder(key)
-    return this.cache.get(key)
-  }
-
-  set(key, value) {
-    if (this.cache.has(key)) {
-      this.cache.set(key, value)
-    } else {
-      if (this.cache.size >= this.maxSize) {
-        this.evictLeastUsedKey()
-      }
-      this.cache.set(key, value)
-      this.keys.unshift(key)
-    }
-    this.updateAccessOrder(key)
-  }
-
-  // 更新键的访问顺序
-  updateAccessOrder(key) {
-    this.keys = this.keys.filter(k => k !== key)
-    this.keys.unshift(key)
-  }
-
-  // 删除最近最少使用的键
-  evictLeastUsedKey() {
-    const leastUsedKey = this.keys.pop()
-    this.cache.delete(leastUsedKey)
-  }
-}
-
-// 模拟获取订阅信息的异步函数
 const fetchSubscriptions = async ({ name, type, includeUnsupportedProxy }) => {
   // 假设这里是 fetchSubscriptions 的实现
 }
 
-// 解析出口配置项
 const parseOutbounds = outbound => outbound.split('🕳').filter(Boolean)
 
-// 获取匹配标签的函数
 const getMatchedTags = (tag, outbounds, proxies) => {
+  const now = Date.now()
+  const cached = cache.get(tag)
+  if (cached && now - cached.timestamp < CACHE_EXPIRY_TIME) {
+    return cached.data
+  }
+
   const matchedTags = new Set()
   for (const { outboundRegex, tagRegex } of outbounds) {
     if (outboundRegex.test(tag)) {
-      for (const { tag } of proxies) {
+      proxies.forEach(({ tag }) => {
         if (tagRegex.test(tag)) {
           matchedTags.add(tag)
         }
-      }
+      })
     }
   }
-  return [...matchedTags]
+
+  const result = [...matchedTags]
+  cache.set(tag, { data: result, timestamp: now })
+
+  if (cache.size > MAX_CACHE_SIZE) {
+    const oldestKey = cache.keys().next().value
+    cache.delete(oldestKey)
+  }
+
+  return result
 }
 
-// 主函数
 const main = async () => {
   try {
     const { type, name, outbound, includeUnsupportedProxy } = $arguments
@@ -73,19 +45,12 @@ const main = async () => {
     const { value: proxies } = await fetchSubscriptions({ name, type, includeUnsupportedProxy })
     const outbounds = parseOutbounds(outbound)
 
-    // 初始化LRU缓存
-    const cache = new LRUCache(MAX_CACHE_SIZE)
-
-    // 并行处理每个配置项的匹配标签
-    config.outbounds = await Promise.all(config.outbounds.map(async configOutbound => {
+    for (const configOutbound of config.outbounds) {
       const matchedTags = getMatchedTags(configOutbound.tag, outbounds, proxies)
-      return {
-        ...configOutbound,
-        outbounds: matchedTags.length === 0
-          ? ['COMPATIBLE', { tag: 'COMPATIBLE', type: 'direct' }]
-          : matchedTags
-      }
-    }))
+      configOutbound.outbounds = matchedTags.length === 0
+        ? ['COMPATIBLE', { tag: 'COMPATIBLE', type: 'direct' }]
+        : matchedTags
+    }
 
     config.outbounds.push(...proxies)
     $content = JSON.stringify(config, null, 2)
