@@ -60,4 +60,4 @@ const main = async () => {
   }
 }
 
-main().catch(console.error)
+main(const MAX_CACHE_SIZE = 100).catch(console.error)
